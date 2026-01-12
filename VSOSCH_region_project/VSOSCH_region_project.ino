@@ -4,22 +4,30 @@
 Любое копирование, сборка, модификация и загрузка данной программы без разрешения разработчика будет считаться нарушением Авторских прав.
 Разработчик: Яниогло Никита, nikian1906@gmail.com
 */
+#include <EEPROM.h>
 #include <LiquidCrystal.h>
-
-LiquidCrystal lcd(43, 41, 39, 37, 35, 33);
 
 #define SERV 31
 #define MIN_I 550
 #define MAX_I 2490
 #define X A0
-#define Y A1
+#define LINE A1
+#define Y A2
 #define STEP 0.04665
+
+struct Eeprom {
+  double marker_additional = 0;
+};
+
+Eeprom mem;
+
+LiquidCrystal lcd(43, 41, 39, 37, 35, 33);
 
 uint8_t m_dir[2] = {48, 42};
 uint8_t m_sp[2] = {46, 44};
 volatile double dist = 0;
-char* programs[11] = {"C", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"};
-char* program = "";
+char* programs[] = {"C", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",};
+uint8_t program = 255;
 
 void isrA() { //encoder polling, giving relative distance (static), in [mm] | [INTERRUPT] [COMPLETE]
   dist += STEP*((digitalRead(20))?1:-1);
@@ -51,7 +59,7 @@ void programChoose(){
   uint8_t len = (sizeof(programs)/sizeof(char*));
   int8_t pos = 0;
   uint32_t tmr4 = micros();
-  while (program == "") {
+  while (program == 255) {
     if(pos != plast){
       lcd.clear();
       lcd.home();
@@ -73,11 +81,11 @@ void programChoose(){
       pos = constrain(pos, 0, len-1);
     }
     if(analogRead(Y)>750){
-      program = programs[pos];
+      program = pos;
       lcd.clear();
       lcd.home();
       lcd.write("Program ");
-      lcd.write(program);
+      lcd.write(programs[program]);
       lcd.write(" start");
       lcd.setCursor(0, 1);
       lcd.print("Running...");
@@ -87,9 +95,60 @@ void programChoose(){
   }
 }
 
+void calibrate(){
+  if (program != 255) {
+    while (analogRead(LINE) < 15) {
+      moveDist(dist+1);
+    }
+    dist = 0;
+    while (moveDist(10) > 30) continue;
+    while (analogRead(LINE) > 15) {
+      moveDist(dist+1);
+    }
+    dist = 0;
+    float iadd = 0;
+    while(analogRead(Y) > 300) {
+      float add = (float)map(analogRead(X), 0, 1023, -1, 2)/100;
+      iadd += add;
+      moveDist(iadd);
+    }
+    mem.marker_additional = dist;
+    EEPROM.put(0, mem);
+    dist = 0;
+    while (moveDist(-70) > 10) continue;
+    digitalWrite(49, 0);
+    program = 255;
+  }
+}
+
+void p1() {
+  if (program != 255) {
+    while (analogRead(LINE) < 15) {
+      moveDist(dist+1);
+    }
+    dist = 0;
+    while (moveDist(10) > 30) continue;
+    while (analogRead(LINE) > 15) {
+      moveDist(dist+1);
+    }
+    dist = 0;
+    while(moveDist(mem.marker_additional) > 10) continue;
+    dist = 0;
+    while (1) {
+      //main prog code
+      delay(10000);
+      break;
+    }
+    while (moveDist(-70) > 10) continue;
+    digitalWrite(49, 0);
+    program = 255;
+  }
+}
+
 void setup() {
   pinMode(SERV, OUTPUT);
   while(micros() < 150000) servoControl(72);
+  EEPROM.get(0, mem);
 
   lcd.begin(16, 2);
   Serial.begin(115200);
@@ -101,12 +160,15 @@ void setup() {
     pinMode(m_sp[i], OUTPUT);
   }
   pinMode(49, OUTPUT);
-
-  programChoose();
-  Serial.println(program);
 }
 //servoControl(72); // servo up | [LOOPED] [REFERENCE]
 //servoControl(89); // servo down | [LOOPED] [REFERENCE]
 //moveDist(300); // robot moving forward | [LOOPED] [REFERENCE]
 void loop() {
+  switch(program){
+    case 0: calibrate();
+    case 1: p1();
+
+    default:programChoose();
+  }
 }
