@@ -114,7 +114,6 @@ void calibrate(){
     }
     mem.marker_additional = dist;
     EEPROM.put(0, mem);
-    dist = 0;
     while (moveDist(-70) > 10) continue;
     digitalWrite(49, 0);
     program = 255;
