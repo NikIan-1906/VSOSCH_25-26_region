@@ -14,6 +14,10 @@
 #define LINE A1
 #define Y A2
 #define STEP 0.04665
+#define GREY 15
+#define SU 72
+#define SD 89
+#define ST 150000
 
 struct Eeprom {
   double marker_additional = 0;
@@ -41,17 +45,33 @@ uint8_t moveDist(int16_t distance){ //moves the robot for given distance, in [mm
   return pwr;
 }
 
-void servoControl(uint8_t deg){ //control servo for given degree | [ASYNC] [COMPLETE]
-  uint16_t impulse = map(deg, 0, 180, MIN_I, MAX_I);
-  static uint32_t tmr1, tmr2;
-  if (micros()-tmr1 > 20000) {
-    tmr1 = tmr2 = micros();
-    digitalWrite(SERV, 1);
+void servoControl(uint8_t deg, uint32_t mcs){ //control servo for given degree | [ASYNC] [COMPLETE]
+  uint32_t tmr = micros();
+  while (micros()-tmr < mcs) {
+    uint16_t impulse = map(deg, 0, 180, MIN_I, MAX_I);
+    static uint32_t tmr1, tmr2;
+    if (micros()-tmr1 > 20000) {
+      tmr1 = tmr2 = micros();
+      digitalWrite(SERV, 1);
+    }
+    if (micros()-tmr2 > impulse){
+      digitalWrite(SERV, 0);
+      tmr2 += 30000;
+    }
   }
-  if (micros()-tmr2 > impulse){
-    digitalWrite(SERV, 0);
-    tmr2 += 30000;
-  }
+}
+
+void dot(int16_t pos) {
+  while (moveDist(pos) > 10) continue;
+  servoControl(SD, ST);
+  servoControl(SU, ST);
+}
+
+void line(int16_t start, int16_t end) {
+  while(moveDist(start) > 10) continue;
+  servoControl(SD, ST);
+  while(moveDist(end) > 10) continue;
+  servoControl(SU, ST);
 }
 
 void programChoose(){
@@ -97,24 +117,24 @@ void programChoose(){
 
 void calibrate(){
   if (program != 255) {
-    while (analogRead(LINE) < 15) {
-      moveDist(dist+1);
+    while (analogRead(LINE) < GREY) {
+      moveDist(dist+1.5);
     }
     dist = 0;
     while (moveDist(10) > 30) continue;
-    while (analogRead(LINE) > 15) {
-      moveDist(dist+1);
-    }
+    while (analogRead(LINE) > GREY) moveDist(dist+1.5);
     dist = 0;
     float iadd = 0;
-    while(analogRead(Y) > 300) {
+    while(analogRead(Y) > 200) {
       float add = (float)map(analogRead(X), 0, 1023, -1, 2)/100;
       iadd += add;
       moveDist(iadd);
     }
     mem.marker_additional = dist;
     EEPROM.put(0, mem);
-    while (moveDist(-70) > 10) continue;
+    while (analogRead(LINE) < GREY) moveDist(-100);
+    dist = 0;
+    while (moveDist(-60) > 10) continue;
     digitalWrite(49, 0);
     program = 255;
   }
@@ -122,13 +142,13 @@ void calibrate(){
 
 void p1() {
   if (program != 255) {
-    while (analogRead(LINE) < 15) {
-      moveDist(dist+1);
+    while (analogRead(LINE) < GREY) {
+      moveDist(dist+1.5);
     }
     dist = 0;
     while (moveDist(10) > 30) continue;
-    while (analogRead(LINE) > 15) {
-      moveDist(dist+1);
+    while (analogRead(LINE) > GREY) {
+      moveDist(dist+1.5);
     }
     dist = 0;
     while(moveDist(mem.marker_additional) > 10) continue;
@@ -138,7 +158,39 @@ void p1() {
       delay(10000);
       break;
     }
-    while (moveDist(-70) > 10) continue;
+    while (moveDist(-60) > 10) continue;
+    digitalWrite(49, 0);
+    program = 255;
+  }
+}
+
+void p2() {
+  if (program != 255) {
+    while (analogRead(LINE) < GREY) {
+      moveDist(dist+1.5);
+    }
+    dist = 0;
+    while (moveDist(10) > 30) continue;
+    while (analogRead(LINE) > GREY) {
+      moveDist(dist+1.5);
+    }
+    dist = 0;
+    while(moveDist(mem.marker_additional) > 10) continue;
+    dist = 0;
+    while (1) {
+      //main prog code
+      dot(10);
+      dot(20);
+      dot(30);
+      line(40, 50);
+      line(60, 70);
+      line(80, 90);
+      dot(100);
+      dot(110);
+      dot(120);
+      break;
+    }
+    while (moveDist(-60) > 10) continue;
     digitalWrite(49, 0);
     program = 255;
   }
@@ -146,7 +198,7 @@ void p1() {
 
 void setup() {
   pinMode(SERV, OUTPUT);
-  while(micros() < 150000) servoControl(72);
+  servoControl(SU, 150000);
   EEPROM.get(0, mem);
 
   lcd.begin(16, 2);
@@ -160,13 +212,12 @@ void setup() {
   }
   pinMode(49, OUTPUT);
 }
-//servoControl(72); // servo up | [LOOPED] [REFERENCE]
-//servoControl(89); // servo down | [LOOPED] [REFERENCE]
 //moveDist(300); // robot moving forward | [LOOPED] [REFERENCE]
 void loop() {
   switch(program){
     case 0: calibrate();
     case 1: p1();
+    case 2: p2();
 
     default:programChoose();
   }
